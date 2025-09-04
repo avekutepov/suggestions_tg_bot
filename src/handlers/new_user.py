@@ -1,6 +1,6 @@
 from telebot import types
 from ..config import Settings
-from ..keyboards.common import kb_dm_link  # ← добавили
+from ..keyboards.common import kb_dm_link
 
 PUBLIC_CHAT_ID = Settings.public_chat_id
 
