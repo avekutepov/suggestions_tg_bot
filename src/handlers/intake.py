@@ -2,6 +2,7 @@ from telebot import types, apihelper
 from ..config import Settings
 from ..utils.text import sanitize_text, human_now
 from ..keyboards.common import kb_moderation, criteria_keyboard
+from ..db import add_suggestion
 from .criteria import _STATE  # общее состояние диалога
 
 PUBLIC_CHAT_ID = Settings.public_chat_id
@@ -15,9 +16,7 @@ def _pop_category(user_id: int) -> str:
     return data.get("category", "—")
 
 def register_handlers(bot):
-    @bot.message_handler(
-        content_types=["text", "photo", "document", "video", "voice"]
-    )
+    @bot.message_handler(content_types=["text", "photo", "document", "video", "voice"])
     def intake(message: types.Message):
         if message.chat.type != "private":
             return
@@ -31,10 +30,7 @@ def register_handlers(bot):
         try:
             member = bot.get_chat_member(PUBLIC_CHAT_ID, message.from_user.id)
             if member.status in ("left", "kicked"):
-                bot.send_message(
-                    message.chat.id,
-                    "🛡️ Доступ только для участников общей группы. Вступите и напишите снова."
-                )
+                bot.send_message(message.chat.id, "🛡️ Доступ только для участников общей группы. Вступите и напишите снова.")
                 return
         except apihelper.ApiTelegramException as e:
             print(f"[get_chat_member] failed: {e}")
@@ -43,29 +39,35 @@ def register_handlers(bot):
 
         uid = message.from_user.id
 
-        # 1) Если уже ждём текст после выбора категории — финализируем заявку
+        # Если уже ждём текст после выбора категории — используем выбранную категорию
         if _is_waiting_text(uid):
             category = _pop_category(uid)
             _finalize_submission(bot, message, category)
             return
 
-        # 2) Иначе — это первое сообщение без /suggest:
-        #    сохраняем черновик и просим выбрать категорию
+        # Иначе — первое сообщение без /suggest: спросим категорию и сохраним черновик
         draft_text = sanitize_text(message.text or message.caption or "")
         draft_media = None
+        media_type = None
+        media_file_id = None
+
         if message.photo:
-            draft_media = {"type": "photo", "file_id": message.photo[-1].file_id}
+            media_type = "photo"
+            media_file_id = message.photo[-1].file_id
         elif message.document:
-            draft_media = {"type": "document", "file_id": message.document.file_id}
+            media_type = "document"
+            media_file_id = message.document.file_id
         elif message.video:
-            draft_media = {"type": "video", "file_id": message.video.file_id}
+            media_type = "video"
+            media_file_id = message.video.file_id
         elif message.voice:
-            draft_media = {"type": "voice", "file_id": message.voice.file_id}
+            media_type = "voice"
+            media_file_id = message.voice.file_id
 
         _STATE[uid] = {
             "stage": "await_category_from_text",
             "draft_text": draft_text,
-            "draft_media": draft_media,
+            "draft_media": {"type": media_type, "file_id": media_file_id} if media_type else None,
         }
 
         bot.send_message(
@@ -75,56 +77,56 @@ def register_handlers(bot):
         )
 
 def _finalize_submission(bot, message: types.Message, category: str):
-    """Общая отправка подтверждения пользователю и карточки менеджерам."""
+    """Сохраняем заявку в БД, подтверждаем пользователю и шлём в чат менеджеров с кнопками."""
     text = sanitize_text(message.text or message.caption or "")
     ts = human_now()
 
-    # подтверждение пользователю
-    user_caption = f"✅ Принято. Время: {ts}\nКатегория: {category}\nТекст: {text or '—'}"
+    # Определяем медиа
+    media_type = None
+    media_file_id = None
+    if message.photo:
+        media_type, media_file_id = "photo", message.photo[-1].file_id
+    elif message.document:
+        media_type, media_file_id = "document", message.document.file_id
+    elif message.video:
+        media_type, media_file_id = "video", message.video.file_id
+    elif message.voice:
+        media_type, media_file_id = "voice", message.voice.file_id
+
+    # Пишем в БД → получаем id
+    sugg_id = add_suggestion(
+    user_id=message.from_user.id,
+    text=text,
+    category=category,
+    media_type=media_type,
+    media_file_id=media_file_id,
+    user_username=message.from_user.username,
+    user_first_name=message.from_user.first_name,
+    user_last_name=message.from_user.last_name,
+    )
+
+    # Подтверждение пользователю
+    user_caption = f"✅ Принято. Время: {ts}\nКатегория: {category}\nНомер: #{sugg_id}\nТекст: {text or '—'}"
     if message.photo:
         bot.send_photo(message.chat.id, message.photo[-1].file_id, caption=user_caption, parse_mode="HTML")
     else:
         bot.send_message(message.chat.id, user_caption, parse_mode="HTML")
 
-    # менеджерам
+    # Менеджерам — карточка + кнопки модерации с id
     if not MANAGERS_CHAT_ID:
         return
 
-    header = f"<b>Новое предложение</b>\n⏱ {ts}\n<b>Категория:</b> {category}"
+    header = f"<b>Новое предложение</b> #{sugg_id}\n⏱ {ts}\n<b>Категория:</b> {category}"
     managers_caption = f"{header}\n\n<b>Текст:</b> {text or '—'}"
 
-    if message.photo:
-        bot.send_photo(
-            chat_id=MANAGERS_CHAT_ID,
-            photo=message.photo[-1].file_id,
-            caption=managers_caption,
-            parse_mode="HTML",
-            reply_markup=kb_moderation()
-        )
-    elif message.document:
-        bot.send_document(
-            MANAGERS_CHAT_ID, message.document.file_id,
-            caption=managers_caption, parse_mode="HTML",
-            reply_markup=kb_moderation()
-        )
-    elif message.video:
-        bot.send_video(
-            MANAGERS_CHAT_ID, message.video.file_id,
-            caption=managers_caption, parse_mode="HTML",
-            reply_markup=kb_moderation()
-        )
-    elif message.voice:
-        bot.send_message(
-            MANAGERS_CHAT_ID,
-            f"{header}\n\n<b>Голосовое сообщение</b>\n<b>Текст:</b> {text or '—'}",
-            parse_mode="HTML",
-            reply_markup=kb_moderation()
-        )
-        bot.send_voice(MANAGERS_CHAT_ID, message.voice.file_id)
+    if media_type == "photo":
+        bot.send_photo(MANAGERS_CHAT_ID, media_file_id, caption=managers_caption, parse_mode="HTML", reply_markup=kb_moderation(sugg_id))
+    elif media_type == "document":
+        bot.send_document(MANAGERS_CHAT_ID, media_file_id, caption=managers_caption, parse_mode="HTML", reply_markup=kb_moderation(sugg_id))
+    elif media_type == "video":
+        bot.send_video(MANAGERS_CHAT_ID, media_file_id, caption=managers_caption, parse_mode="HTML", reply_markup=kb_moderation(sugg_id))
+    elif media_type == "voice":
+        m = bot.send_message(MANAGERS_CHAT_ID, managers_caption, parse_mode="HTML", reply_markup=kb_moderation(sugg_id))
+        bot.send_voice(MANAGERS_CHAT_ID, media_file_id)
     else:
-        bot.send_message(
-            MANAGERS_CHAT_ID,
-            managers_caption,
-            parse_mode="HTML",
-            reply_markup=kb_moderation()
-        )
+        bot.send_message(MANAGERS_CHAT_ID, managers_caption, parse_mode="HTML", reply_markup=kb_moderation(sugg_id))

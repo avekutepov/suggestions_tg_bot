@@ -3,6 +3,7 @@ import telebot
 from telebot import apihelper
 from .config import Settings
 from .handlers import register_all
+from .db import init_db
 
 bot = telebot.TeleBot(Settings.bot_token)
 
@@ -19,5 +20,6 @@ if PUBLIC_CHAT_USERNAME:
 register_all(bot)
 
 if __name__ == "__main__":
+    init_db()
     bot.remove_webhook()
     bot.infinity_polling(skip_pending=True, timeout=30, long_polling_timeout=30)

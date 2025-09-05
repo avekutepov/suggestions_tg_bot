@@ -1,10 +1,17 @@
 from telebot import types
-from ..keyboards.common import criteria_keyboard, cancel_reply_kb
-from ..config import Settings
+from ..keyboards.common import criteria_keyboard, cancel_reply_kb, kb_moderation
 from ..utils.text import human_now
-from ..keyboards.common import kb_moderation
+from ..config import Settings
+from ..db import add_suggestion
 
-_STATE = {}  
+# Простое состояние на пользователя:
+# _STATE[user_id] = {
+#   "stage": "await_text" | "await_category_from_text",
+#   "category": str | None,
+#   "draft_text": str | None,
+#   "draft_media": {"type": "...", "file_id": "..."} | None
+# }
+_STATE = {}
 
 def _reset(uid: int):
     _STATE.pop(uid, None)
@@ -12,6 +19,7 @@ def _reset(uid: int):
 def register_handlers(bot):
     @bot.message_handler(commands=["suggest", "idea", "criteria"])
     def start_flow(message: types.Message):
+        # Запуск выбора категории «с нуля»
         _reset(message.from_user.id)
         bot.send_message(
             message.chat.id,
@@ -30,7 +38,7 @@ def register_handlers(bot):
             except Exception:
                 pass
             bot.answer_callback_query(call.id, "Выбор отменён ❌", show_alert=False)
-            bot.send_message(call.message.chat.id, "🚫 Отменено. Начните заново командой /suggest.")
+            bot.send_message(call.message.chat.id, "🚫 Действие отменено. Начните заново командой /suggest.")
             return
 
         mapping = {
@@ -44,53 +52,71 @@ def register_handlers(bot):
 
         st = _STATE.get(uid) or {}
 
-        # Если до выбора категории пользователь уже прислал сообщение — финализируем сразу
+        # СЦЕНАРИЙ B: пользователь сначала прислал сообщение (черновик),
+        # теперь выбрал категорию → сразу оформляем
         if st.get("stage") == "await_category_from_text":
-            draft_text = st.get("draft_text") or ""
-            draft_media = st.get("draft_media")
+            draft_text = (st.get("draft_text") or "").strip()
+            draft_media = st.get("draft_media")  # {"type": "...", "file_id": "..."} | None
             _reset(uid)
 
-            ts = human_now()
-            user_caption = f"✅ Принято. Время: {ts}\nКатегория: {category}\nТекст: {draft_text or '—'}"
+            # сохраняем в БД
+            sugg_id = add_suggestion(
+                user_id=uid,
+                text=draft_text,
+                category=category,
+                media_type=(draft_media or {}).get("type"),
+                media_file_id=(draft_media or {}).get("file_id"),
+                user_username=call.from_user.username,
+                user_first_name=call.from_user.first_name,
+                user_last_name=call.from_user.last_name,
+            )
 
-            # подтверждение пользователю
+            ts = human_now()
+            user_caption = (
+                f"✅ Принято. Время: {ts}\n"
+                f"Категория: {category}\n"
+                f"Номер: #{sugg_id}\n"
+                f"Текст: {draft_text or '—'}"
+            )
+
+            # подтверждение пользователю (если фото — отправим фото с подписью)
+            try:
+                bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+            except Exception:
+                pass
+            bot.answer_callback_query(call.id)
+
             if draft_media and draft_media.get("type") == "photo":
                 bot.send_photo(call.message.chat.id, draft_media["file_id"], caption=user_caption, parse_mode="HTML")
             else:
                 bot.send_message(call.message.chat.id, user_caption, parse_mode="HTML")
 
-            # менеджерам
+            # менеджерам карточка с кнопками
             man_id = Settings.managers_chat_id
             if man_id:
-                header = f"<b>Новое предложение</b>\n⏱ {ts}\n<b>Категория:</b> {category}"
+                header = f"<b>Новое предложение</b> #{sugg_id}\n⏱ {ts}\n<b>Категория:</b> {category}"
                 managers_caption = f"{header}\n\n<b>Текст:</b> {draft_text or '—'}"
-
-                if draft_media:
-                    t = draft_media.get("type")
-                    fid = draft_media.get("file_id")
-                    if t == "photo":
-                        bot.send_photo(man_id, fid, caption=managers_caption, parse_mode="HTML", reply_markup=kb_moderation())
-                    elif t == "document":
-                        bot.send_document(man_id, fid, caption=managers_caption, parse_mode="HTML", reply_markup=kb_moderation())
-                    elif t == "video":
-                        bot.send_video(man_id, fid, caption=managers_caption, parse_mode="HTML", reply_markup=kb_moderation())
-                    elif t == "voice":
-                        bot.send_message(man_id, managers_caption, parse_mode="HTML", reply_markup=kb_moderation())
-                        bot.send_voice(man_id, fid)
+                dm = draft_media
+                if dm and dm.get("type") == "photo":
+                    bot.send_photo(man_id, dm["file_id"], caption=managers_caption, parse_mode="HTML",
+                                   reply_markup=kb_moderation(sugg_id))
+                elif dm and dm.get("type") == "document":
+                    bot.send_document(man_id, dm["file_id"], caption=managers_caption, parse_mode="HTML",
+                                      reply_markup=kb_moderation(sugg_id))
+                elif dm and dm.get("type") == "video":
+                    bot.send_video(man_id, dm["file_id"], caption=managers_caption, parse_mode="HTML",
+                                   reply_markup=kb_moderation(sugg_id))
+                elif dm and dm.get("type") == "voice":
+                    bot.send_message(man_id, managers_caption, parse_mode="HTML", reply_markup=kb_moderation(sugg_id))
+                    bot.send_voice(man_id, dm["file_id"])
                 else:
-                    bot.send_message(man_id, managers_caption, parse_mode="HTML", reply_markup=kb_moderation())
+                    bot.send_message(man_id, managers_caption, parse_mode="HTML", reply_markup=kb_moderation(sugg_id))
 
-            # снимаем inline-кнопки под исходным сообщением с категориями
-            try:
-                bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
-            except Exception:
-                pass
-
-            bot.answer_callback_query(call.id)
             return
 
-        # Обычный сценарий: выбрали категорию → ждём текст
+        # СЦЕНАРИЙ A: обычный — выбрали категорию, дальше ждём текст
         _STATE[uid] = {"stage": "await_text", "category": category}
+
         try:
             bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
         except Exception:
@@ -116,20 +142,35 @@ def register_handlers(bot):
     @bot.message_handler(func=lambda m: _STATE.get(m.from_user.id, {}).get("stage") == "await_text",
                          content_types=['text'])
     def got_text(message: types.Message):
+        # СЦЕНАРИЙ A: ждём текст после выбора категории
         st = _STATE.pop(message.from_user.id, {})
-        category = st.get("category", "—")
+        category = (st.get("category") or "—").strip()
         text = (message.text or "").strip()
+        ts = human_now()
 
+        # сохраняем в БД (без медиа)
+        sugg_id = add_suggestion(
+            user_id=message.from_user.id,
+            text=text,
+            category=category,
+            media_type=None,
+            media_file_id=None,
+            user_username=message.from_user.username,
+            user_first_name=message.from_user.first_name,
+            user_last_name=message.from_user.last_name,
+        )
+
+        # подтверждение пользователю
         bot.send_message(
             message.chat.id,
-            f"✅ Принято.\n<b>Категория:</b> {category}\n<b>Текст:</b> {text}",
+            f"✅ Принято.\n<b>Категория:</b> {category}\n<b>Номер:</b> #{sugg_id}\n<b>Текст:</b> {text or '—'}",
             parse_mode="HTML",
             reply_markup=types.ReplyKeyboardRemove()
         )
 
+        # менеджерам — карточка с кнопками
         man_id = Settings.managers_chat_id
         if man_id:
-            ts = human_now()
-            header = f"<b>Новое предложение</b>\n⏱ {ts}\n<b>Категория:</b> {category}"
+            header = f"<b>Новое предложение</b> #{sugg_id}\n⏱ {ts}\n<b>Категория:</b> {category}"
             managers_caption = f"{header}\n\n<b>Текст:</b> {text or '—'}"
-            bot.send_message(man_id, managers_caption, parse_mode="HTML", reply_markup=kb_moderation())
+            bot.send_message(man_id, managers_caption, parse_mode="HTML", reply_markup=kb_moderation(sugg_id))
