@@ -3,10 +3,16 @@ from telebot import types
 def kb_moderation(sugg_id: int) -> types.InlineKeyboardMarkup:
     kb = types.InlineKeyboardMarkup()
     kb.add(
-        types.InlineKeyboardButton("✅ Одобрить", callback_data=f"moder:approve:{sugg_id}"),
-        types.InlineKeyboardButton("🚫 Отклонить", callback_data=f"moder:reject:{sugg_id}"),
+        types.InlineKeyboardButton("✅ Одобрить", callback_data=f"moder:ok:{sugg_id}"),
+        types.InlineKeyboardButton("🚫 Отклонить", callback_data=f"moder:rej:{sugg_id}")
     )
     return kb
+
+def kb_moderation_final(text: str) -> types.InlineKeyboardMarkup:
+    kb = types.InlineKeyboardMarkup()
+    kb.add(types.InlineKeyboardButton(text, callback_data="moder:done"))
+    return kb
+
 
 def criteria_keyboard() -> types.InlineKeyboardMarkup:
     kb = types.InlineKeyboardMarkup(row_width=2)
