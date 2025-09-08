@@ -1,13 +1,17 @@
-# src/db.py
+import os
 import sqlite3
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
-DB_PATH = Path(__file__).resolve().parents[1] / "data" / "suggestions.db"
+_DB_ENV = os.getenv("DB_PATH")
+if _DB_ENV:
+    DB_PATH = Path(_DB_ENV)
+else:
+    DB_PATH = Path(__file__).resolve().parents[1] / "data" / "suggestions.db"
 
-def _conn():
+
+def _conn() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    # row_factory поставим в get_* при необходимости
     return sqlite3.connect(DB_PATH)
 
 
@@ -16,7 +20,7 @@ def _column_exists(cur: sqlite3.Cursor, table: str, col: str) -> bool:
     return any(r[1] == col for r in cur.fetchall())
 
 
-def init_db():
+def init_db() -> None:
     with _conn() as conn:
         cur = conn.cursor()
 
@@ -29,12 +33,12 @@ def init_db():
             category TEXT,
             media_type TEXT,           -- photo | document | video | voice | NULL
             media_file_id TEXT,
-            status TEXT DEFAULT 'pending',  -- pending | approved | rejected
+            status TEXT DEFAULT 'pending',  -- pending | in_process | approved | rejected
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """)
 
-        # Миграции: отсутствующие колонки
+        # Миграции (добавочные поля)
         migrations = [
             ("user_username",   "ALTER TABLE suggestions ADD COLUMN user_username TEXT"),
             ("user_first_name", "ALTER TABLE suggestions ADD COLUMN user_first_name TEXT"),
@@ -45,7 +49,7 @@ def init_db():
             if not _column_exists(cur, "suggestions", col):
                 cur.execute(ddl)
 
-        # Индексы (по статусу и дате)
+        # Индексы
         cur.execute("CREATE INDEX IF NOT EXISTS idx_suggestions_status ON suggestions(status)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_suggestions_created_at ON suggestions(created_at)")
 
@@ -98,21 +102,28 @@ def set_status(sugg_id: int, status: str) -> None:
 
 
 def update_status(sugg_id: int, status: str) -> None:
+    # совместимость со старым кодом
     set_status(sugg_id, status)
 
-def list_suggestions(status: str | None = None, start: str | None = None, end: str | None = None, limit: int = 200):
+
+def list_suggestions(
+    status: Optional[str] = None,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    limit: int = 200
+) -> List[Dict[str, Any]]:
     """
-    Вернуть список заявок в виде dict.
-    Фильтры:
-      - status: например, 'in_process'
-      - start/end: строки '%Y-%m-%d %H:%M:%S' по полю created_at (локальное время)
-      - limit: максимум записей
+    Возвращает список заявок в виде dict-ов.
+    Параметры:
+      - status: фильтр по статусу (например, 'in_process')
+      - start, end: границы по created_at включительно, строки '%Y-%m-%d %H:%M:%S'
+      - limit: максимум строк
     """
     conn = _conn()
     try:
         q = (
-            "SELECT id, user_id, text, category, media_type, media_file_id, "
-            "status, created_at, user_username, user_first_name, user_last_name "
+            "SELECT id, user_id, text, category, media_type, media_file_id, status, "
+            "created_at, user_username, user_first_name, user_last_name "
             "FROM suggestions WHERE 1=1"
         )
         args = []
@@ -129,8 +140,9 @@ def list_suggestions(status: str | None = None, start: str | None = None, end: s
         if limit:
             q += " LIMIT ?"
             args.append(int(limit))
+
         cur = conn.execute(q, args)
         cols = [c[0] for c in cur.description]
-        return [dict(zip(cols, row)) for row in cur.fetchall()]
+        return [dict(zip(cols, r)) for r in cur.fetchall()]
     finally:
         conn.close()

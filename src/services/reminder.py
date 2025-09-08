@@ -4,10 +4,9 @@ from datetime import datetime, timedelta
 from telebot import types
 from ..config import Settings
 
-WEEKDAY_TUESDAY = 1  # Monday=0, Tuesday=1, ... Sunday=6
+WEEKDAY_TUESDAY = 1  # Вторник
 
 def _next_run(after: datetime, weekday: int, hour: int, minute: int) -> datetime:
-    """Вернёт ближайшую дату-время запуска после 'after' (включая сегодня, если время ещё не прошло)."""
     target = after.replace(hour=hour, minute=minute, second=0, microsecond=0)
     # прокрутка до нужного дня недели
     days_ahead = (weekday - target.weekday()) % 7
@@ -40,11 +39,6 @@ def _send_reminder(bot):
     bot.send_message(chat_id, text, reply_markup=kb, parse_mode=None, disable_notification=True)
 
 def start_weekly_public_reminder(bot, weekday: int = WEEKDAY_TUESDAY, hour: int = 10, minute: int = 0):
-    """
-    Запускает фоновую задачу: каждую неделю в указанный день/время (локальное время процесса)
-    отправляет напоминание в Settings.public_chat_id.
-    По умолчанию — вторник 10:00.
-    """
     def worker():
         while True:
             now = datetime.now()
