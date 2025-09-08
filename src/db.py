@@ -5,7 +5,6 @@ from typing import Optional, Dict, Any
 
 DB_PATH = Path(__file__).resolve().parents[1] / "data" / "suggestions.db"
 
-
 def _conn():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     # row_factory поставим в get_* при необходимости
@@ -100,3 +99,38 @@ def set_status(sugg_id: int, status: str) -> None:
 
 def update_status(sugg_id: int, status: str) -> None:
     set_status(sugg_id, status)
+
+def list_suggestions(status: str | None = None, start: str | None = None, end: str | None = None, limit: int = 200):
+    """
+    Вернуть список заявок в виде dict.
+    Фильтры:
+      - status: например, 'in_process'
+      - start/end: строки '%Y-%m-%d %H:%M:%S' по полю created_at (локальное время)
+      - limit: максимум записей
+    """
+    conn = _conn()
+    try:
+        q = (
+            "SELECT id, user_id, text, category, media_type, media_file_id, "
+            "status, created_at, user_username, user_first_name, user_last_name "
+            "FROM suggestions WHERE 1=1"
+        )
+        args = []
+        if status:
+            q += " AND status = ?"
+            args.append(status)
+        if start:
+            q += " AND created_at >= ?"
+            args.append(start)
+        if end:
+            q += " AND created_at <= ?"
+            args.append(end)
+        q += " ORDER BY created_at DESC"
+        if limit:
+            q += " LIMIT ?"
+            args.append(int(limit))
+        cur = conn.execute(q, args)
+        cols = [c[0] for c in cur.description]
+        return [dict(zip(cols, row)) for row in cur.fetchall()]
+    finally:
+        conn.close()
