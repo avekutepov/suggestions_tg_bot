@@ -14,14 +14,12 @@ def kb_moderation_final(text: str) -> types.InlineKeyboardMarkup:
     return kb
 
 def criteria_keyboard() -> types.InlineKeyboardMarkup:
-    kb = types.InlineKeyboardMarkup(row_width=2)
-    kb.add(
-        types.InlineKeyboardButton("💰 Экономия средств", callback_data="crit_money"),
-        types.InlineKeyboardButton("⏱ Экономия времени",   callback_data="crit_time"),
-        types.InlineKeyboardButton("⚙ Улучшение процесса", callback_data="crit_process"),
-        types.InlineKeyboardButton("🛡 Безопасность",       callback_data="crit_safety"),
-        types.InlineKeyboardButton("➕ Другое",             callback_data="crit_other"),
-    )
+    kb = types.InlineKeyboardMarkup(row_width=1)
+    kb.add(types.InlineKeyboardButton("💰 Экономия средств", callback_data="crit_money"))
+    kb.add(types.InlineKeyboardButton("⏱ Экономия времени", callback_data="crit_time"))
+    kb.add(types.InlineKeyboardButton("⚙ Улучшение процесса", callback_data="crit_process"))
+    kb.add(types.InlineKeyboardButton("🛡 Безопасность", callback_data="crit_safety"))
+    kb.add(types.InlineKeyboardButton("➕ Другое", callback_data="crit_other"))
     kb.add(types.InlineKeyboardButton("❌ Отмена", callback_data="crit_cancel"))
     return kb
 
