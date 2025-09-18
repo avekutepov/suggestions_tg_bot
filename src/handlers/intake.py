@@ -5,6 +5,7 @@ from ..config import Settings
 from ..utils.text import sanitize_text, human_now
 from ..keyboards.common import criteria_keyboard, kb_moderation
 from .criteria import _STATE, _author_line
+from ..utils.auth import is_allowed_user
 
 def _reset(uid: int):
     _STATE.pop(uid, None)
@@ -24,6 +25,16 @@ def register_handlers(bot):
         func=lambda m: m.chat.type == 'private' and not (m.text and m.text.startswith('/'))
     )
     def on_any_message(message: types.Message):
+        if message.from_user and message.from_user.is_bot:
+            return
+
+        if not is_allowed_user(bot, message.from_user.id, allowed_chats=(Settings.public_chat_id, Settings.managers_chat_id)):
+            bot.send_message(
+                message.chat.id,
+                "❌ Бот принимает предложения только от сотрудников. "
+                "Если вы сотрудник — убедитесь, что состоите в рабочей группе."
+            )
+            return
 
         uid = message.from_user.id
         st = _STATE.get(uid) or {}

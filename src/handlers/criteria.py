@@ -66,7 +66,6 @@ def register_handlers(bot):
         category = mapping.get(call.data, "—")
         st = _STATE.get(uid) or {}
 
-        # 1) Уже есть черновик (текст/медиа): сохраняем сразу
         if st.get("stage") == SuggestStage.AWAIT_CATEGORY_FROM_TEXT.value and (st.get("draft_text") or st.get("draft_media")):
             draft_text  = (st.get("draft_text") or "").strip()
             draft_media = st.get("draft_media")
@@ -143,7 +142,6 @@ def register_handlers(bot):
                     )
             return
 
-        # 2) /suggest → категории ещё нет → ждём текст/медиа и ПОКАЗЫВАЕМ reply «Отмена» в чате
         _STATE[uid] = {
             "stage": SuggestStage.AWAIT_TEXT.value,
             "category": category,
@@ -159,7 +157,6 @@ def register_handlers(bot):
         send_text_prompt(bot, call.message.chat.id, category)
 
 
-# --- Вынесенные функции для повторного использования ---
 def send_category_choice(bot, chat_id: int):
     bot.send_message(
         chat_id,
