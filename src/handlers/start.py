@@ -26,13 +26,3 @@ def register_handlers(bot):
                 message.chat.id,
                 "👋 Привет! Нажмите /suggest, чтобы отправить анонимное предложение."
             )
-
-    @bot.message_handler(commands=['suggest'])
-    def suggest(message: types.Message):
-        if message.chat.type != "private":
-            return
-        bot.send_message(
-            message.chat.id,
-            "Выберите категорию вашего предложения:",
-            reply_markup=criteria_keyboard()
-        )

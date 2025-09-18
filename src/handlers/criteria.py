@@ -35,11 +35,9 @@ def _author_line(u: types.User) -> str:
 def register_handlers(bot):
     @bot.message_handler(commands=["suggest", "idea", "criteria"])
     def start_flow(message: types.Message):
-        # работаем только в ЛС
         if message.chat.type != 'private':
             return
 
-        # доступ только сотрудникам (участники public/managers)
         if not is_allowed_user(
             bot,
             message.from_user.id,
@@ -50,16 +48,19 @@ def register_handlers(bot):
                 message.chat.id,
                 "⛔ Бот принимает предложения только от сотрудников. "
                 "Убедитесь, что вы состоите в рабочей группе.",
+                reply_markup=types.ReplyKeyboardRemove()
             )
             return
 
-        _STATE[message.from_user.id] = {
-            "stage": SuggestStage.AWAIT_CATEGORY_FROM_TEXT.value,
-            "category": None,
-            "draft_text": None,
-            "draft_media": None,
-        }
-        send_category_choice(bot, message.chat.id)
+        # Только если пользователь авторизован и нет состояния — показываем клавиатуру
+        if message.from_user.id not in _STATE:
+            _STATE[message.from_user.id] = {
+                "stage": SuggestStage.AWAIT_CATEGORY_FROM_TEXT.value,
+                "category": None,
+                "draft_text": None,
+                "draft_media": None,
+            }
+            send_category_choice(bot, message.chat.id)
 
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("crit_"))
     def on_category(call: types.CallbackQuery):
