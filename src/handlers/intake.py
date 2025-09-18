@@ -1,14 +1,18 @@
 from telebot import types
 from html import escape
+
 from ..db import add_suggestion
 from ..config import Settings
 from ..utils.text import sanitize_text, human_now
 from ..keyboards.common import criteria_keyboard, kb_moderation
 from .criteria import _STATE, _author_line
 from ..utils.auth import is_allowed_user
+from ..utils.media import send_media_with_caption
+
 
 def _reset(uid: int):
     _STATE.pop(uid, None)
+
 
 def register_handlers(bot):
     @bot.message_handler(func=lambda m: m.chat.type == 'private' and (m.text or '').strip() == "❌ Отмена")
@@ -28,7 +32,10 @@ def register_handlers(bot):
         if message.from_user and message.from_user.is_bot:
             return
 
-        if not is_allowed_user(bot, message.from_user.id, allowed_chats=(Settings.public_chat_id, Settings.managers_chat_id)):
+        if not is_allowed_user(
+            bot, message.from_user.id,
+            allowed_chats=(Settings.public_chat_id, Settings.managers_chat_id)
+        ):
             bot.send_message(
                 message.chat.id,
                 "❌ Бот принимает предложения только от сотрудников. "
@@ -38,10 +45,12 @@ def register_handlers(bot):
 
         uid = message.from_user.id
         st = _STATE.get(uid) or {}
+
         raw_text = message.text or message.caption or ""
         text = sanitize_text(raw_text)
         text_html = escape(text) if text else "—"
 
+        # Собираем медиу, если есть
         draft_media = None
         if message.photo:
             draft_media = {"type": "photo", "file_id": message.photo[-1].file_id}
@@ -52,7 +61,7 @@ def register_handlers(bot):
         elif message.voice:
             draft_media = {"type": "voice", "file_id": message.voice.file_id}
 
-        # A) /suggest -> категория уже выбрана
+        # A) /suggest -> категория уже выбрана: сразу сохраняем
         if st.get("stage") == "await_text":
             category = st.get("category") or "—"
             _reset(uid)
@@ -76,22 +85,13 @@ def register_handlers(bot):
                 f"Текст: {text_html}"
             )
 
-            if draft_media and draft_media.get("type") == "photo":
-                bot.send_photo(
-                    message.chat.id,
-                    draft_media["file_id"],
-                    caption=user_caption,
-                    parse_mode="HTML",
-                    reply_markup=types.ReplyKeyboardRemove()
-                )
-            else:
-                bot.send_message(
-                    message.chat.id,
-                    user_caption,
-                    parse_mode="HTML",
-                    reply_markup=types.ReplyKeyboardRemove()
-                )
+            # Пользователю
+            send_media_with_caption(
+                bot, message.chat.id, draft_media, user_caption,
+                reply_markup=types.ReplyKeyboardRemove()
+            )
 
+            # Менеджерам
             man_id = Settings.managers_chat_id
             if man_id:
                 header = (
@@ -101,14 +101,13 @@ def register_handlers(bot):
                     f"{_author_line(message.from_user)}"
                 )
                 caption = f"{header}\n\n<b>Текст:</b> {text_html}"
-                if draft_media and draft_media.get("type") == "photo":
-                    bot.send_photo(man_id, draft_media["file_id"], caption=caption, parse_mode="HTML",
-                                   reply_markup=kb_moderation(sugg_id))
-                else:
-                    bot.send_message(man_id, caption, parse_mode="HTML", reply_markup=kb_moderation(sugg_id))
+                send_media_with_caption(
+                    bot, man_id, draft_media, caption,
+                    reply_markup=kb_moderation(sugg_id)
+                )
             return
 
-        # B) ждём категорию (через /suggest) -> обновляем черновик
+        # B) ждём категорию (после /suggest): обновляем черновик и ждём выбора
         if st.get("stage") == "await_category_from_text":
             st.update({
                 "draft_text": text,
@@ -117,7 +116,7 @@ def register_handlers(bot):
             _STATE[uid] = st
             return
 
-        # C) пользователь начал с текста/медиа -> просим выбрать категорию
+        # C) пользователь начал с текста/медиа: просим выбрать категорию
         _STATE[uid] = {
             "stage": "await_category_from_text",
             "category": None,
