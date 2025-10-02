@@ -4,14 +4,6 @@ from datetime import datetime, timedelta
 from telebot import types
 from ..config import Settings
 
-def register_handlers(bot):
-    @bot.message_handler(commands=["remind"])
-    def manual_reminder(message: types.Message):
-        if message.chat.id != Settings.managers_chat_id:
-            return
-        _send_reminder(bot)
-        bot.reply_to(message, "✅ Напоминание отправлено в общую группу")
-
 WEEKDAY_TUESDAY = 1  # Вторник
 
 def _next_run(after: datetime, weekday: int, hour: int, minute: int) -> datetime:
@@ -73,3 +65,11 @@ def start_weekly_public_reminder(bot, weekday: int = WEEKDAY_TUESDAY, hour: int 
     t = threading.Thread(target=worker, name="weekly_public_reminder", daemon=True)
     t.start()
     return t
+
+def register_handlers(bot):
+    @bot.message_handler(commands=["remind"])
+    def manual_reminder(message: types.Message):
+        if message.chat.id != Settings.managers_chat_id:
+            return
+        _send_reminder(bot)
+        bot.reply_to(message, "✅ Напоминание отправлено в общую группу")
