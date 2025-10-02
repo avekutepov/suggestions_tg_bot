@@ -1,7 +1,7 @@
 import importlib
 import logging
 
-ORDER = ["start", "criteria", "intake", "new_user", "moderation", "misc", "reports"]
+ORDER = ["start", "criteria", "intake", "new_user", "moderation", "misc", "reports", "reminder"]
 
 def register_all(bot):
     for name in ORDER:
