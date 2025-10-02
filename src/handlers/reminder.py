@@ -1,6 +1,6 @@
 from telebot import types
 from ..config import Settings
-from . import _send_reminder
+from .. services.autoreminder import _send_reminder
 
 def register_handlers(bot):
     @bot.message_handler(commands=["remind"])
