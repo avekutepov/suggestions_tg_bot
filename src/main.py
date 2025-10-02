@@ -4,7 +4,7 @@ from telebot import apihelper
 from .config import Settings
 from .handlers import register_all
 from .db import init_db
-from .services.reminder import start_weekly_public_reminder
+from .services.autoreminder import start_weekly_public_reminder
 
 bot = telebot.TeleBot(Settings.bot_token)
 
